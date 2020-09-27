@@ -8,12 +8,11 @@ try:
 except:
     idadir = os.path.join(os.environ['USERPROFILE'], r'AppData\Roaming\Hex-Rays\IDA Pro')
 plugins_folder = os.path.join(idadir, "plugins")
-
 binkit_paths = [os.path.join(plugins_folder, "binkit")]
 
 for binkit_path in binkit_paths:
     print("Adding path: %s" % binkit_path)
-    sys.path.insert(0, binkit_path)
+    sys.path.append(binkit_path)
 
 import pybinkit
 import client
@@ -28,7 +27,7 @@ matchTypeMap = {
     "CALLED":  5
 }
 
-class Differ:
+class BinaryMatcher:
     def __init__(self, log_setting_filename = ''):
         self.function_matches = None
         self.binaries = []        
@@ -42,7 +41,7 @@ class Differ:
         self.profile_list = self.profiles.list()
         return self.profile_list
 
-    def export(self, filename):
+    def export(self, filename, index = 0):
         if index >= len(self.profile_list):
             print("Index is bigger than %d" % len(self.profile_list))
         else:
@@ -55,41 +54,42 @@ class Differ:
         connection.root.export(filename)
 
     def load(self, filename):
+        print('load: %s' % filename)
         self.binaries.append(pybinkit.Binary(filename))
 
     def diff(self, algorithm = 'init', match_type = 'CREF_FROM', iteration = 1):
+        print('diff algorithm: %s' % algorithm)
+        total_match_count = 0
         if len(self.binaries) < 2:
-            return        
-        match_type = matchTypeMap.get(match_type.upper(), 1)
+            return total_match_count
 
+        print('  %s vs %s' % (self.binaries[0].get_md5(), self.binaries[1].get_md5()))
+
+        match_type = matchTypeMap.get(match_type.upper(), 1)
         if self.function_matches == None or algorithm == 'init':
             diff_algorithms = pybinkit.DiffAlgorithms(self.binaries[0], self.binaries[1])
             self.basic_block_matches = diff_algorithms.do_instruction_hash_match()
-            #for match in self.basic_block_matches:
-            #    pprint.pprint('%.8x - %.8x (%d)' % (match.source, match.target, match.match_rate))
-
-            self.function_matches = pybinkit.FunctionMatches(self.binaries[0], self.binaries[1])
+            total_match_count += len(self.basic_block_matches)
+            self.function_matches = pybinkit.FunctionMatching(self.binaries[0], self.binaries[1])
             self.function_matches.add_matches(self.basic_block_matches)
 
         i = 0
         while i < iteration:
-            matched_count = 0
+            current_match_count = 0
             if algorithm == ('inshash', 'hash'):
-                print('> do_instruction_hash_match:')
-                matched_count = self.function_matches.do_instruction_hash_match()
-
+                print('* do_instruction_hash_match:')
+                current_match_count = self.function_matches.do_instruction_hash_match()
             elif algorithm in ('cf', 'controlflow'):
-                print('> do_control_flow_match:')
-                matched_count = self.function_matches.do_control_flow_match(0, match_type)
-
+                print('* do_control_flow_match:')
+                current_match_count = self.function_matches.do_control_flow_match(0, match_type)
+            print('current_match_count: %d' % current_match_count)
+            total_match_count += current_match_count            
+            if current_match_count == 0:
+                break
             i += 1
 
-            print('\tmatched_count: %d' % matched_count)
-            if matched_count == 0:
-                print('match looped: %d' % i)
-                break
-
-        self.print_function_matches()
+        print('total_match_count: %d' % total_match_count)
+        return total_match_count
 
     def print_function_matches(self):
         function_match_tool = FunctionMatchTool(self.function_matches, binaries = self.binaries)
@@ -124,3 +124,26 @@ class Differ:
                 continue
 
             connection.root.show_diff(filename)
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='BinKit BinaryMatcher')
+    parser.add_argument('-c', '--command', metavar='command', type=str, default = '', help='File script command')
+    parser.add_argument('-o', '--output_filename', metavar='output_filename', type=str, default = 'diff.yml', help='Output filename')
+    parser.add_argument('filenames', metavar='filenames', nargs='+', type=str, help='IDAPython script filename')
+    args = parser.parse_args()
+
+    binary_matcher = BinaryMatcher()
+    for filename in args.filenames:
+        binary_matcher.load(filename)
+
+    match_count = binary_matcher.diff(algorithm = 'init')
+    while match_count > 0:
+        match_count = binary_matcher.diff(algorithm = 'hash')
+        binary_matcher.print_function_matches()
+
+        for matchType in matchTypeMap:
+            match_count += binary_matcher.diff(algorithm = 'controlflow', match_type = matchType, iteration = 100)
+        binary_matcher.print_function_matches()
+    binary_matcher.save(args.output_filename)
