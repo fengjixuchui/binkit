@@ -11,16 +11,19 @@ FunctionMatching::FunctionMatching(Binary* p_sourceBinary, Binary* p_targetBinar
 
 void FunctionMatching::AddMatches(vector<BasicBlockMatch> basicBlockMatches)
 {
-    BOOST_LOG_TRIVIAL(debug) << boost::format("AddMatches count: %d") % basicBlockMatches.size();
+    BOOST_LOG_TRIVIAL(debug) << boost::format("FunctionMatching::AddMatches count: %d") % basicBlockMatches.size();
     for (BasicBlockMatch basicBlockMatch : basicBlockMatches)
     {
-        Function* pSrcFunction = m_sourceBinary->GetFunction(basicBlockMatch.Source);
-        Function* pTargetFunction = m_targetBinary->GetFunction(basicBlockMatch.Target);
-
-        BOOST_LOG_TRIVIAL(debug) << boost::format("pSrcFunction: %p pTargetFunction: %p") % pSrcFunction % pTargetFunction;
-        if (pSrcFunction && pTargetFunction)
+        for(Function* pSrcFunction : m_sourceBinary->GetFunction(basicBlockMatch.Source))
         {
-            m_functionMatchList.Add(pSrcFunction->GetAddress(), pTargetFunction->GetAddress(), basicBlockMatch);
+            for(Function* pTargetFunction : m_targetBinary->GetFunction(basicBlockMatch.Target))
+            {
+                BOOST_LOG_TRIVIAL(debug) << boost::format("FunctionMatching::AddMatches %s (%x) - %s (%x) %x - %x (%d)") % 
+                    pSrcFunction->GetSymbol() % pSrcFunction->GetAddress() %
+                    pTargetFunction->GetSymbol() % pTargetFunction->GetAddress() %
+                    basicBlockMatch.Source % basicBlockMatch.Target % basicBlockMatch.MatchRate;
+                m_functionMatchList.Add(pSrcFunction->GetAddress(), pTargetFunction->GetAddress(), basicBlockMatch);
+            }
         }
     }
 }
@@ -35,20 +38,15 @@ void FunctionMatching::RemoveMatches(int matchSequence)
     m_functionMatchList.RemoveMatches(matchSequence);
 }
 
-int FunctionMatching::DoFunctionInstructionHashMatch(va_t sourceFunctionAddress, va_t targetFunctionAddress)
+int FunctionMatching::DoFunctionInstructionHashMatch(va_t srcFunctionAddress, va_t targetFunctionAddress)
 {
-    Function *sourceFunction = m_sourceBinary->GetFunction(sourceFunctionAddress);
-    Function *targetFunction = m_targetBinary->GetFunction(targetFunctionAddress);
-
-    if (sourceFunction && targetFunction)
-    {
-        unordered_set<va_t> sourceFunctionAddresses = sourceFunction->GetBasicBlocks();
-        unordered_set<va_t> targetFunctionAddresses = targetFunction->GetBasicBlocks();
-        vector<BasicBlockMatch> basicBlockMatches = m_pdiffAlgorithms->DoBlocksInstructionHashMatch(sourceFunctionAddresses, targetFunctionAddresses);
-        m_functionMatchList.Add(sourceFunctionAddress, targetFunctionAddress, basicBlockMatches);
-        return basicBlockMatches.size();
-    }
-    return 0;
+    Function *pSrcFunction = m_sourceBinary->GetFunctionByStartAddress(srcFunctionAddress);
+    Function *pTargetFunction = m_targetBinary->GetFunctionByStartAddress(targetFunctionAddress);
+    unordered_set<va_t> srcFunctionAddresses = pSrcFunction->GetBasicBlocks();
+    unordered_set<va_t> targetFunctionAddresses = pTargetFunction->GetBasicBlocks();
+    vector<BasicBlockMatch> basicBlockMatches = m_pdiffAlgorithms->DoBlocksInstructionHashMatch(srcFunctionAddresses, targetFunctionAddresses);
+    m_functionMatchList.Add(srcFunctionAddress, targetFunctionAddress, basicBlockMatches);
+    return basicBlockMatches.size();
 }
 
 int FunctionMatching::DoInstructionHashMatch()
@@ -63,18 +61,18 @@ int FunctionMatching::DoInstructionHashMatch()
     {
         for(auto & val : m_functionMatchList.GetFunctionAddresses())
         {
-            va_t sourceFunctionAddress = val.first;
+            va_t srcFunctionAddress = val.first;
             va_t targetFunctionAddress = val.second;
-            unordered_set<va_t> sourceFunctionAddresses = m_sourceBinary->GetFunction(sourceFunctionAddress)->GetBasicBlocks();
-            unordered_set<va_t> targetFunctionAddresses = m_targetBinary->GetFunction(targetFunctionAddress)->GetBasicBlocks();
-            vector<BasicBlockMatch> basicBlockMatchList = m_pdiffAlgorithms->DoBlocksInstructionHashMatch(sourceFunctionAddresses, targetFunctionAddresses);
+            Function* pSrcFunction = m_sourceBinary->GetFunctionByStartAddress(srcFunctionAddress);
+            Function* targetFunction = m_targetBinary->GetFunctionByStartAddress(targetFunctionAddress);
+            unordered_set<va_t> srcFunctionAddresses = pSrcFunction->GetBasicBlocks();
+            unordered_set<va_t> targetFunctionAddresses = targetFunction->GetBasicBlocks();
+            vector<BasicBlockMatch> basicBlockMatchList = m_pdiffAlgorithms->DoBlocksInstructionHashMatch(srcFunctionAddresses, targetFunctionAddresses);
             matchCount += basicBlockMatchList.size();
-            m_functionMatchList.Add(sourceFunctionAddress, targetFunctionAddress, basicBlockMatchList);
+            m_functionMatchList.Add(srcFunctionAddress, targetFunctionAddress, basicBlockMatchList);
         }
     }
-
     m_matchSequence++;
-
     return matchCount;
 }
 
@@ -119,32 +117,34 @@ int FunctionMatching::DoControlFlowMatch(va_t address, int matchType)
                 break;            
         }
 
-        BOOST_LOG_TRIVIAL(debug) << boost::format("matchType: %x matchMask: %x") % matchType % matchMask;
-
         for(FunctionMatch & functionMatch : m_functionMatchList.GetMatches(matchMask))
         {
-            vector<BasicBlockMatch> fullBasicBlockMatchList;
-            BOOST_LOG_TRIVIAL(debug) << boost::format("Function Source: %x Target: %x") % functionMatch.SourceFunction % functionMatch.TargetFunction;
             for (BasicBlockMatch *p_basicBlockMatch : functionMatch.BasicBlockMatchList)
             {
-                BOOST_LOG_TRIVIAL(debug) << boost::format("   Source: %x Target: %x") % p_basicBlockMatch->Source % p_basicBlockMatch->Target;
+                BOOST_LOG_TRIVIAL(debug) << boost::format("* DoControlFlowMatch: %x (%x) %x (%x) matchType: %x") % functionMatch.SourceFunction % p_basicBlockMatch->Source % functionMatch.TargetFunction % p_basicBlockMatch->Target % matchType;
                 vector<BasicBlockMatch> basicBlockMatchList = m_pdiffAlgorithms->DoControlFlowMatch(p_basicBlockMatch->Source, p_basicBlockMatch->Target, matchType);
-                BOOST_LOG_TRIVIAL(debug) << boost::format("AddBasicBlockMatches: basicBlockMatchList.size(): %x") % basicBlockMatchList.size();
-
                 for (BasicBlockMatch basicBlockMatch : basicBlockMatchList)
                 {
-                    Function* pSrcFunction = m_sourceBinary->GetFunction(basicBlockMatch.Source);
-                    Function* pTargetFunction = m_targetBinary->GetFunction(basicBlockMatch.Target);
-
-                    if (pSrcFunction && pTargetFunction)
+                    BOOST_LOG_TRIVIAL(debug) << boost::format("  - basicBlockMatch: %x %x (MatchRate: %d)") % basicBlockMatch.Source % basicBlockMatch.Target % basicBlockMatch.MatchRate;
+                    for(Function* pSrcFunction : m_sourceBinary->GetFunction(basicBlockMatch.Source))
                     {
-                        if (m_functionMatchList.Add(pSrcFunction->GetAddress(), pTargetFunction->GetAddress(), basicBlockMatch))
+                        for(Function* pTargetFunction : m_targetBinary->GetFunction(basicBlockMatch.Target))
                         {
-                            matchCount++;
+                            BOOST_LOG_TRIVIAL(debug) << boost::format("    - basicBlockMatch %s (%x) - %s (%x) (MatchRate: %d)") % 
+                                pSrcFunction->GetSymbol() %
+                                basicBlockMatch.Source %
+                                pTargetFunction->GetSymbol() %                                
+                                basicBlockMatch.Target %
+                                basicBlockMatch.MatchRate;
+
+                            if (m_functionMatchList.Add(pSrcFunction->GetAddress(), pTargetFunction->GetAddress(), basicBlockMatch), "      ")
+                            {
+                                matchCount++;
+                            }
                         }
                     }
                 }
-                p_basicBlockMatch->Flags |= matchMask;                
+                p_basicBlockMatch->Flags |= matchMask;
             }
         }
     }

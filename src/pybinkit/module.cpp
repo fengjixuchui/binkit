@@ -23,7 +23,8 @@ PYBIND11_MODULE(pybinkit, m) {
         .def("get_image_base", &Binary::GetImageBase)
         .def("get_basic_blocks", &Binary::GetBasicBlocks, py::return_value_policy::reference)
         .def("get_functions", &Binary::GetFunctions)
-        .def("get_function", &Binary::GetFunction, py::return_value_policy::reference);
+        .def("get_function", &Binary::GetFunction, py::return_value_policy::reference)
+        .def("get_function_by_start_address", &Binary::GetFunctionByStartAddress, py::return_value_policy::reference);
 
     /*
     typedef struct _BasicBlock_ {
@@ -110,7 +111,7 @@ PYBIND11_MODULE(pybinkit, m) {
         .def(py::init())
         .def_readwrite("source", &FunctionMatch::SourceFunction)
         .def_readwrite("target", &FunctionMatch::TargetFunction)
-        .def_readwrite("basic_block_match_list", &FunctionMatch::BasicBlockMatchList);
+        .def_readwrite("matches", &FunctionMatch::BasicBlockMatchList);
 
     py::class_<FunctionMatching>(m, "FunctionMatching")
         .def(py::init<Binary*, Binary*>())

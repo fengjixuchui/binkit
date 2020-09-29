@@ -16,7 +16,7 @@ for binkit_path in binkit_paths:
 
 import pybinkit
 import client
-from storage import *
+from function_match import *
 
 matchTypeMap = {
     "CALL":  0,
@@ -63,8 +63,6 @@ class BinaryMatcher:
         if len(self.binaries) < 2:
             return total_match_count
 
-        print('  %s vs %s' % (self.binaries[0].get_md5(), self.binaries[1].get_md5()))
-
         match_type = matchTypeMap.get(match_type.upper(), 1)
         if self.function_matches == None or algorithm == 'init':
             diff_algorithms = pybinkit.DiffAlgorithms(self.binaries[0], self.binaries[1])
@@ -82,18 +80,18 @@ class BinaryMatcher:
             elif algorithm in ('cf', 'controlflow'):
                 print('* do_control_flow_match:')
                 current_match_count = self.function_matches.do_control_flow_match(0, match_type)
-            print('current_match_count: %d' % current_match_count)
+            print('  current_match_count: %d' % current_match_count)
             total_match_count += current_match_count            
             if current_match_count == 0:
                 break
             i += 1
 
-        print('total_match_count: %d' % total_match_count)
+        print('  total_match_count: %d' % total_match_count)
         return total_match_count
 
     def print_function_matches(self):
-        function_match_tool = FunctionMatchTool(self.function_matches, binaries = self.binaries)
-        print(function_match_tool.get_stats())
+        function_matches = FunctionMatchTool(function_matches = self.function_matches, binaries = self.binaries)
+        print(function_matches.get_stats())
         """
         for function_match in util.get_function_match_list():
             print('* %.8x - %.8x' % (function_match['source'], function_match['target']))
@@ -105,11 +103,8 @@ class BinaryMatcher:
     def save(self, filename):
         if not self.function_matches:
             return
-
-        function_match_tool = FunctionMatchTool(self.function_matches, binaries = self.binaries)
-        function_match_storage = function_match_tool.get_function_match_file()
-        print("Saving diff snapshot to " + filename)
-        function_match_storage.save(filename)
+        function_matches = FunctionMatchTool(function_matches = self.function_matches, binaries = self.binaries)
+        function_matches.save(filename)
 
     def show_on_ida(self, filename):
         profile_list = self.profiles.list()
