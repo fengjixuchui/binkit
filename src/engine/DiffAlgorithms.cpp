@@ -21,11 +21,11 @@ DiffAlgorithms::DiffAlgorithms(Binary* p_sourceBinary, Binary* p_targetBinary)
 
 int DiffAlgorithms::GetInstructionHashMatchRate(vector<unsigned char> instructionHash1, vector<unsigned char> instructionHash2)
 {
-    int matchRate = 0;
-
-    size_t lengthDifference = (instructionHash1.size() - instructionHash2.size());
-    matchRate = GetStringSimilarity(BytesToHexString(instructionHash1).c_str(), BytesToHexString(instructionHash2).c_str());
-    return matchRate;
+    if (instructionHash1.size() == 0 && instructionHash2.size() == 0)
+    {
+        return 100;
+    }
+    return GetStringSimilarity(BytesToHexString(instructionHash1).c_str(), BytesToHexString(instructionHash2).c_str());;
 }
 
 vector<BasicBlockMatch> DiffAlgorithms::DoInstructionHashMatch()
@@ -167,29 +167,55 @@ int DiffAlgorithms::GetMatchRate(va_t source, va_t target)
             return it2->second;
         }
     }
-
     int matchRate = GetInstructionHashMatchRate(m_psourceBasicBlocks->GetInstructionHash(source), m_ptargetBasicBlocks->GetInstructionHash(target));
     it->second.insert(pair<va_t, int>(target, matchRate));
-
     return matchRate;
 }
 
 vector<BasicBlockMatch> DiffAlgorithms::DoControlFlowMatch(va_t sourceAddress, va_t targetAddress, int matchType)
 {
-    bool debug = false;
-    vector<BasicBlockMatch> controlFlowMatches;
-
+    vector<BasicBlockMatch> matches;
     vector<va_t> sourceAddresses = m_psourceBasicBlocks->GetCodeReferences(sourceAddress, matchType);
     vector<va_t> targetAddresses = m_ptargetBasicBlocks->GetCodeReferences(targetAddress, matchType);
 
-    if (sourceAddresses.size() == 0 || targetAddresses.size() == 0)
+    for (int i = 0; i < sourceAddresses.size(); i++)
     {
-        return controlFlowMatches;
+        int matchedIndex = -1;
+        int maxMatchRate = 0;
+        int maxMatchCount = 0;
+        for (int j = 0; j < targetAddresses.size(); j++)
+        {
+            int matchRate = GetMatchRate(sourceAddresses[i], targetAddresses[j]);
+            BOOST_LOG_TRIVIAL(debug) << boost::format("Source: %x Target: %x MatchRate: %d") %
+                sourceAddresses[i] % targetAddresses[j] % matchRate;
+
+            if (maxMatchRate == matchRate)
+            {
+                maxMatchCount++;
+            }
+            else if (maxMatchRate < matchRate)
+            {
+                matchedIndex = j;
+                maxMatchRate = matchRate;
+                maxMatchCount = 1;
+            }
+        }
+
+        if (maxMatchRate > 0 && maxMatchCount == 1)
+        {
+            BasicBlockMatch basicBlockMatch;
+            basicBlockMatch.Type = CONTROLFLOW_MATCH;
+            basicBlockMatch.SourceParent = sourceAddress;
+            basicBlockMatch.TargetParent = targetAddress;
+            basicBlockMatch.Source = sourceAddresses[i];
+            basicBlockMatch.Target = targetAddresses[matchedIndex];
+            basicBlockMatch.MatchRate = maxMatchRate;
+            matches.push_back(basicBlockMatch);
+        }
     }
 
-    if (sourceAddresses.size() > 2 && sourceAddresses.size() == targetAddresses.size() && matchType == CREF_FROM)
+    if (matches.size() == 0 && sourceAddresses.size() == targetAddresses.size() && matchType == CREF_FROM)
     {
-        //Special case for switch case
         for (int i = 0; i < sourceAddresses.size(); i++)
         {
             BasicBlockMatch basicBlockMatch;
@@ -200,54 +226,11 @@ vector<BasicBlockMatch> DiffAlgorithms::DoControlFlowMatch(va_t sourceAddress, v
             basicBlockMatch.Source = sourceAddresses[i];
             basicBlockMatch.Target = targetAddresses[i];
             basicBlockMatch.MatchRate = GetMatchRate(sourceAddresses[i], targetAddresses[i]);
-            controlFlowMatches.push_back(basicBlockMatch);
-        }
-        return controlFlowMatches;
-    }
-
-    for (int i = 0; i < sourceAddresses.size(); i++)
-    {
-        int maxMatchRate = 0;
-        BasicBlockMatch basicBlockMatch;
-        vector<unsigned char> srcInstructionHash = m_psourceBasicBlocks->GetInstructionHash(sourceAddresses[i]);
-        for (int j = 0; j < targetAddresses.size(); j++)
-        {
-            vector<unsigned char> targetInstructionHash = m_ptargetBasicBlocks->GetInstructionHash(targetAddresses[j]);
-            if (srcInstructionHash.size() > 0 && targetInstructionHash.size() > 0)
-            {
-                int matchRate = GetMatchRate(sourceAddresses[i], targetAddresses[j]);
-                if (maxMatchRate < matchRate)
-                {
-                    maxMatchRate = matchRate;
-                    basicBlockMatch.Type = CONTROLFLOW_MATCH;
-                    basicBlockMatch.SourceParent = sourceAddress;
-                    basicBlockMatch.TargetParent = targetAddress;
-                    basicBlockMatch.Source = sourceAddresses[i];
-                    basicBlockMatch.Target = targetAddresses[j];
-                    basicBlockMatch.ReferenceOrderDifference = abs(i - j);
-                    basicBlockMatch.MatchRate = matchRate;
-                }
-            }
-            else if (srcInstructionHash.size() == 0 && targetInstructionHash.size() == 0)
-            {
-                maxMatchRate = 100;
-                basicBlockMatch.Type = CONTROLFLOW_MATCH;
-                basicBlockMatch.SourceParent = sourceAddress;
-                basicBlockMatch.TargetParent = targetAddress;
-                basicBlockMatch.Source = sourceAddresses[i];
-                basicBlockMatch.Target = targetAddresses[j];
-                basicBlockMatch.ReferenceOrderDifference = abs(i - j);
-                basicBlockMatch.MatchRate = 100;
-            }
-        }
-
-        if (maxMatchRate > 0)
-        {
-            controlFlowMatches.push_back(basicBlockMatch);
+            matches.push_back(basicBlockMatch);
         }
     }
 
-    return controlFlowMatches;
+    return matches;
 }
 
 vector<BasicBlockMatchCombination*> DiffAlgorithms::DoControlFlowMatches(vector<AddressPair> addressPairs, int matchType)
